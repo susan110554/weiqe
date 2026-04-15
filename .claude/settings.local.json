@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(grep -r 'async def main' /c/Users/Administrator/Desktop/维权机器人 --include=*.py)",
+      "Bash(grep -r 'if __name__' /c/Users/Administrator/Desktop/维权机器人 --include=*.py)",
+      "Bash(grep -r \"app\\\\s*=\\\\|server\\\\s*=\\\\|port\\\\s*=\" /c/Users/Administrator/Desktop/维权机器人 --include=*.py)",
+      "Bash(grep -r \"flask\\\\|fastapi\\\\|uvicorn\\\\|gunicorn\\\\|django\" /c/Users/Administrator/Desktop/维权机器人 --include=*.py --include=*.txt)"
+    ]
+  }
+}

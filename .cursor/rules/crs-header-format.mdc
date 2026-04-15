@@ -1,0 +1,21 @@
+---
+description: CRS 抬头格式规范，禁止随意改动
+globs: bot_modules/crs.py
+alwaysApply: false
+---
+
+# CRS 抬头格式（锁定）
+
+修改 CRS 相关页面时，**不得随意改动已锁定的抬头格式**。仅可修改业务文案（如说明文字、按钮文案），不可改动以下结构：
+
+## 规范要点
+
+1. **第一行固定**：`IC3 | Internet Crime Complaint Center`，不得改为其他标题或省略。
+2. **分隔线**：统一使用常量 `MAIN_SEP`（`━━━━━━━━━━━━━━━━━━`），不得改用其他符号或长度。
+3. **SECTION 标题**：格式为 `📱/⛓️ SECTION CRS-XX` 与副标题分两行，副标题全大写（如 `SUBJECT IDENTIFICATION`、`CRYPTOCURRENCY TRANSACTION`）。
+4. **法律声明**：CRS-03 等含 `Processed under 18 U.S.C. § 1343.` 的页面，该行与 MAIN_SEP 顺序、换行不得改动。
+5. **FEDERAL INDEX VER. / SESSION HASH**：展示行仅用 `FEDERAL_INDEX_LINE`（格式 `FEDERAL INDEX VER. {FEDERAL_INDEX_VERSION}`，勿用小写 `v`、勿加盾牌等图标前缀）；SESSION HASH 用 `_module_session_hash(模块ID)`，不得删减或改格式。
+
+## 参考
+
+具体格式以 `bot_modules/crs.py` 文件内「抬头格式规范（锁定）」注释块为准；新增 CRS 子页时请沿用既有 SECTION 的排版，保持风格一致。
