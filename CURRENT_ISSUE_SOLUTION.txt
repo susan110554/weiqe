@@ -1,0 +1,104 @@
+═══════════════════════════════════════════════════════════════
+  当前问题解决方案
+═══════════════════════════════════════════════════════════════
+
+你遇到的问题:
+
+1. ❌ 后端启动失败
+   错误: ConnectionResetError
+   原因: 使用了main.py而不是main_fixed.py
+
+2. ❌ npm命令找不到
+   错误: 'npm' 不是内部或外部命令
+   原因: 未安装Node.js
+
+═══════════════════════════════════════════════════════════════
+  立即解决
+═══════════════════════════════════════════════════════════════
+
+问题1: 启动后端 ✅ 立即可用
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+错误的命令:
+  python -m uvicorn web_controller.main:app --reload --port 8000
+
+正确的命令 (选一个):
+
+  方式1: 双击启动脚本
+    start_backend.bat
+
+  方式2: Python脚本
+    python start_web_controller.py
+
+  方式3: 直接命令
+    python -m uvicorn web_controller.main_fixed:app --reload --port 8000
+
+
+问题2: 启动前端 ⚠️ 需要先安装Node.js
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+步骤1: 安装Node.js
+  详细说明: 打开 INSTALL_NODEJS.txt
+  
+  快速版:
+  1. 访问 https://nodejs.org/
+  2. 下载 LTS 版本
+  3. 安装 (默认选项即可)
+  4. 重新打开命令提示符
+  5. 验证: node --version
+
+步骤2: 启动前端
+  cd frontend
+  npm install
+  npm run dev
+
+═══════════════════════════════════════════════════════════════
+  现在可以做的
+═══════════════════════════════════════════════════════════════
+
+✅ 立即可用 - 后端API
+  
+  双击运行: start_backend.bat
+  
+  或在命令行:
+  python -m uvicorn web_controller.main_fixed:app --reload --port 8000
+  
+  访问: http://localhost:8000/docs
+  
+  测试API是否正常工作
+
+
+⏳ 等待Node.js安装 - 前端
+  
+  安装Node.js后:
+  cd frontend
+  npm install
+  npm run dev
+  
+  访问: http://localhost:3000
+
+
+═══════════════════════════════════════════════════════════════
+  推荐操作顺序
+═══════════════════════════════════════════════════════════════
+
+现在:
+  1. 双击 start_backend.bat 启动后端
+  2. 访问 http://localhost:8000/docs 测试API
+
+然后 (可选):
+  3. 安装Node.js (参考 INSTALL_NODEJS.txt)
+  4. 启动前端 (cd frontend; npm install; npm run dev)
+  5. 访问 http://localhost:3000
+
+═══════════════════════════════════════════════════════════════
+  相关文件
+═══════════════════════════════════════════════════════════════
+
+📄 START_GUIDE.txt           - 完整启动指南
+📄 INSTALL_NODEJS.txt        - Node.js安装详细教程
+📄 start_backend.bat         - 后端启动脚本 (双击运行)
+📄 start_web_controller.py   - 后端启动脚本 (Python)
+📄 frontend/start.bat        - 前端启动脚本 (需要Node.js)
+
+═══════════════════════════════════════════════════════════════

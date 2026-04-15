@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Federal Contractor Payment Receipt — {{ receipt_id }}</title>
+  <style type="text/css">
+    @page { size: A4; margin: 18mm 16mm; }
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      color: #1a1a1a;
+      line-height: 1.35;
+    }
+    .header {
+      border-bottom: 2px solid #1a3a5c;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+    .header h1 {
+      margin: 0 0 4px 0;
+      font-size: 14pt;
+      color: #1a3a5c;
+      letter-spacing: 0.5px;
+    }
+    .header .sub {
+      font-size: 8pt;
+      color: #555;
+    }
+    .badge {
+      display: inline-block;
+      background: #1a3a5c;
+      color: #fff;
+      padding: 2px 8px;
+      font-size: 8pt;
+      margin-top: 6px;
+    }
+    table.meta {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+    }
+    table.meta td {
+      padding: 5px 8px;
+      border: 1px solid #ccc;
+      vertical-align: top;
+    }
+    table.meta td.k {
+      width: 32%;
+      background: #f5f7fa;
+      font-weight: bold;
+      font-size: 8.5pt;
+    }
+    .section-title {
+      font-size: 10pt;
+      font-weight: bold;
+      color: #1a3a5c;
+      margin: 16px 0 6px 0;
+      border-left: 3px solid #1a3a5c;
+      padding-left: 8px;
+    }
+    .mono {
+      font-family: Courier, monospace;
+      font-size: 8.5pt;
+      word-break: break-all;
+    }
+    .footer {
+      margin-top: 22px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+      font-size: 7.5pt;
+      color: #666;
+    }
+    .warn {
+      font-size: 7.5pt;
+      color: #444;
+      margin-top: 10px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>CHAINALYSIS CONTRACTOR PAYMENT RECEIPT</h1>
+    <div class="sub">Internet Crime Complaint Center (IC3) — Third-Party Federal Contractor Payment Record</div>
+    <div class="badge">VERIFIED PAYMENT DOCUMENT</div>
+  </div>
+
+  <div class="section-title">Receipt identification</div>
+  <table class="meta">
+    <tr><td class="k">Receipt ID (serial)</td><td class="mono">{{ receipt_id }}</td></tr>
+    <tr><td class="k">Case ID</td><td class="mono">{{ case_id }}</td></tr>
+    <tr><td class="k">Payor (complainant)</td><td>{{ user_name }}</td></tr>
+    <tr><td class="k">Payment timestamp (UTC)</td><td>{{ timestamp }}</td></tr>
+  </table>
+
+  <div class="section-title">Payment details</div>
+  <table class="meta">
+    <tr><td class="k">Amount</td><td><strong>{{ payment_amount }}</strong></td></tr>
+    <tr><td class="k">Currency / network</td><td>{{ payment_currency }}</td></tr>
+    <tr><td class="k">Blockchain transaction hash</td><td class="mono">{{ tx_hash }}</td></tr>
+    <tr><td class="k">Block height</td><td>{{ block_height }}</td></tr>
+    <tr><td class="k">Confirmations</td><td>{{ confirmations }}</td></tr>
+  </table>
+
+  <div class="section-title">Contractor &amp; authorization</div>
+  <table class="meta">
+    <tr><td class="k">Service contractor (payee)</td><td>{{ contractor_name }}</td></tr>
+    <tr><td class="k">Federal procurement contract</td><td class="mono">{{ contract_no }}</td></tr>
+    <tr><td class="k">Authorizing officer</td><td>{{ agent_name }}</td></tr>
+    <tr><td class="k">Agent ID</td><td class="mono">{{ agent_id }}</td></tr>
+  </table>
+
+  <div class="footer">
+    This receipt documents a payment made to a <strong>private contractor</strong> (not a direct payment to the FBI).
+    Retain this document for your records. For questions, reference your Case ID and Receipt ID in all correspondence.
+  </div>
+  <p class="warn">
+    Generated electronically from blockchain and case management records at the time of payment confirmation.
+  </p>
+</body>
+</html>

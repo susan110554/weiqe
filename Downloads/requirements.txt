@@ -1,0 +1,24 @@
+# IC3 Admin Web Controller – Python dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
+# Database (shared with core services)
+asyncpg>=0.29.0
+
+# Auth
+PyJWT>=2.8.0
+
+# Data validation (comes with FastAPI but pinned for clarity)
+pydantic>=2.7.0
+
+# Async HTTP (used by WhatsApp adapter later)
+aiohttp>=3.9.0
+
+# Optional: Redis for distributed session/cache
+# redis>=5.0.0
+
+# Optional: file uploads
+python-multipart>=0.0.9

@@ -1,0 +1,144 @@
+═══════════════════════════════════════════════════════════════
+  FBI IC3 快速启动指南 - Windows环境
+═══════════════════════════════════════════════════════════════
+
+遇到的问题:
+1. ❌ 后端启动失败 - 使用了main.py而不是main_fixed.py
+2. ❌ npm命令未找到 - 需要安装Node.js
+
+═══════════════════════════════════════════════════════════════
+  解决方案
+═══════════════════════════════════════════════════════════════
+
+问题1: 后端启动
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+错误命令:
+  python -m uvicorn web_controller.main:app --reload --port 8000
+
+正确命令:
+  python -m uvicorn web_controller.main_fixed:app --reload --port 8000
+                                    ^^^^^^^^^^^
+                                    使用main_fixed (Windows优化版)
+
+或使用快捷脚本:
+  python start_web_controller.py
+
+
+问题2: 前端启动 - 需要安装Node.js
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+步骤1: 下载Node.js
+  访问: https://nodejs.org/
+  下载: LTS版本 (推荐 18.x 或 20.x)
+  文件: node-vXX.XX.X-x64.msi
+
+步骤2: 安装Node.js
+  - 双击安装包
+  - 默认安装即可
+  - 会自动安装npm
+
+步骤3: 验证安装
+  打开新的命令提示符窗口:
+  
+  node --version
+  npm --version
+  
+  应该显示版本号
+
+步骤4: 安装前端依赖
+  cd C:\Users\Administrator\Desktop\weiqe\frontend
+  npm install
+
+步骤5: 启动前端
+  npm run dev
+
+  访问: http://localhost:3000
+
+═══════════════════════════════════════════════════════════════
+  完整启动流程
+═══════════════════════════════════════════════════════════════
+
+前提条件:
+  ✅ PostgreSQL 正在运行
+  ✅ 数据库已创建
+  ⚠️  Node.js 需要安装 (前端需要)
+
+启动后端:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
+  方式1: 使用脚本
+    python start_web_controller.py
+  
+  方式2: 直接命令
+    python -m uvicorn web_controller.main_fixed:app --reload --port 8000
+  
+  成功标志:
+    ✅ Uvicorn running on http://127.0.0.1:8000
+    ✅ Application startup complete
+    ✅ 没有ConnectionResetError错误
+
+启动前端:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  (安装Node.js后)
+  
+  cd frontend
+  npm install      (首次需要安装依赖)
+  npm run dev
+  
+  访问: http://localhost:3000
+  登录: admin-token
+
+═══════════════════════════════════════════════════════════════
+  如果不想安装Node.js
+═══════════════════════════════════════════════════════════════
+
+可以只使用后端API，通过以下方式测试:
+
+1. 使用Postman/Insomnia等工具测试API
+2. 使用curl命令测试
+3. 编写Python脚本调用API
+
+后端API已完整可用，前端只是一个可选的管理界面。
+
+═══════════════════════════════════════════════════════════════
+  常见问题
+═══════════════════════════════════════════════════════════════
+
+Q: 为什么main.py不能用？
+A: main.py使用连接池，在Windows环境下有连接问题。
+   main_fixed.py使用单连接模式，适配Windows环境。
+
+Q: 必须安装Node.js吗？
+A: 如果需要使用Web前端管理界面，则必须安装。
+   如果只使用API或Telegram/WhatsApp，则不需要。
+
+Q: npm install很慢怎么办？
+A: 可以使用淘宝镜像:
+   npm config set registry https://registry.npmmirror.com
+   npm install
+
+Q: 端口被占用怎么办？
+A: 后端: 修改启动命令的--port参数
+   前端: 修改vite.config.js中的port配置
+
+═══════════════════════════════════════════════════════════════
+  推荐的启动顺序
+═══════════════════════════════════════════════════════════════
+
+1️⃣ 启动PostgreSQL数据库
+
+2️⃣ 启动后端API (必需)
+   python start_web_controller.py
+
+3️⃣ (可选) 启动前端
+   cd frontend
+   npm run dev
+
+4️⃣ (可选) 启动Telegram Bot
+   python start_telegram_adapter.py
+
+5️⃣ (可选) 配置WhatsApp webhook
+
+═══════════════════════════════════════════════════════════════
