@@ -781,3 +781,67 @@ async def broadcast_worker_loop(app: Application) -> None:
         except Exception:
             logger.exception("[broadcast] worker tick")
         await asyncio.sleep(60)
+
+
+async def push_task_worker_loop(app: Application) -> None:
+    """
+    Polls push_tasks table every 30s.
+    Executes any row with status='pending' and scheduled_at <= NOW().
+    Sends Telegram message and updates status to 'sent' or 'failed'.
+    """
+    import asyncio
+    from bot_modules.case_management_push import (
+        build_p1_push, build_p2_push, build_p3_push, build_p4_push,
+        build_p5_identity_push, build_p6_preliminary_push, build_p7_asset_tracing_push,
+        build_p8_legal_push, build_p9_disbursement_push, build_p10_sanction_push,
+        build_p11_protocol_push, build_p12_final_auth_push,
+    )
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            due = await db.push_task_fetch_pending(limit=20)
+            for row in due:
+                task_id = row["id"]
+                case_no = row["case_no"]
+                phase = row["phase"]
+                tg_user_id = row["tg_user_id"]
+                logger.info("[push_task] executing id=%s case=%s phase=%s uid=%s", task_id, case_no, phase, tg_user_id)
+                try:
+                    # 根据阶段构建推送内容
+                    phase_builders = {
+                        "P1": build_p1_push,
+                        "P2": build_p2_push,
+                        "P3": build_p3_push,
+                        "P4": build_p4_push,
+                        "P5": build_p5_identity_push,
+                        "P6": build_p6_preliminary_push,
+                        "P7": build_p7_asset_tracing_push,
+                        "P8": build_p8_legal_push,
+                        "P9": build_p9_disbursement_push,
+                        "P10": build_p10_sanction_push,
+                        "P11": build_p11_protocol_push,
+                        "P12": build_p12_final_auth_push,
+                    }
+                    builder = phase_builders.get(phase.upper())
+                    if builder:
+                        body, kb = builder(case_no)
+                        msg = await app.bot.send_message(
+                            int(tg_user_id),
+                            body,
+                            parse_mode="HTML",
+                            reply_markup=kb
+                        )
+                        await db.push_task_mark_sent(task_id, msg.message_id)
+                        logger.info("[push_task] id=%s sent successfully msg_id=%s", task_id, msg.message_id)
+                    else:
+                        await db.push_task_mark_failed(task_id, f"No builder for phase {phase}")
+                        logger.warning("[push_task] id=%s no builder for phase %s", task_id, phase)
+                except Exception as e:
+                    await db.push_task_mark_failed(task_id, str(e))
+                    logger.exception("[push_task] id=%s failed", task_id)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("[push_task] worker tick")
+        await asyncio.sleep(30)

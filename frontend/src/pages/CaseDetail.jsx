@@ -9,9 +9,10 @@ import {
   ArrowLeftOutlined, SendOutlined, ExclamationCircleOutlined, FilePdfOutlined,
   PlusOutlined, DeleteOutlined, UploadOutlined, CheckCircleOutlined, CloseCircleOutlined,
   EyeOutlined, RocketOutlined, BellOutlined, UserOutlined, CalendarOutlined,
-  EditOutlined, ClockCircleOutlined, PlayCircleOutlined, PauseCircleOutlined
+  EditOutlined, ClockCircleOutlined, PlayCircleOutlined, PauseCircleOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
-import { casesAPI, casePhaseAPI, agentsAPI } from '../services/api';
+import { casesAPI, casePhaseAPI, agentsAPI, pushTaskAPI } from '../services/api';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
@@ -697,26 +698,57 @@ function AutoPushSettings({ caseData }) {
 }
 
 // ── 个人案件推送组件 ─────────────────────────────────────────
+// 自动推送当前案件的 Case Overview 给单个用户（P1-P12阶段）
 function PersonalPush({ caseData }) {
   const [pushData, setPushData] = useState({
-    message: '',
     scheduledAt: null,
     immediate: true
   });
   const [loading, setLoading] = useState(false);
 
+  // 构建 Case Overview 显示
+  const buildCaseOverview = () => {
+    const phase = caseData?.status || 'P1';
+    const platform = caseData?.platform || 'N/A';
+    const amount = caseData?.amount || 'N/A';
+    const coin = caseData?.coin || '';
+    const caseNo = caseData?.case_no || 'N/A';
+    const createdAt = caseData?.created_at ? caseData.created_at.substring(0, 10) : 'N/A';
+    
+    return {
+      phase,
+      platform,
+      amount,
+      coin,
+      caseNo,
+      createdAt,
+      overviewText: `📋 Case Overview - ${caseNo}
+━━━━━━━━━━━━━━━━━━━━━
+📊 当前阶段: ${phase}
+💰 涉案金额: ${amount} ${coin}
+📱 平台: ${platform}
+📅 提交时间: ${createdAt}
+━━━━━━━━━━━━━━━━━━━━━
+
+系统将自动推送此案件状态给用户。`
+    };
+  };
+
+  const caseOverview = buildCaseOverview();
+
   const handleSend = async () => {
-    if (!pushData.message.trim()) {
-      message.warning('请输入推送内容');
-      return;
-    }
     setLoading(true);
     try {
-      await casePhaseAPI.sendPersonalPush(caseData.case_no, pushData);
-      message.success('推送已发送/预约');
-      setPushData({ message: '', scheduledAt: null, immediate: true });
-    } catch {
-      message.error('发送失败');
+      // 只发送 scheduledAt 和 immediate，后端自动构建 Case Overview
+      await casePhaseAPI.sendPersonalPush(caseData.case_no, {
+        scheduledAt: pushData.scheduledAt,
+        immediate: pushData.immediate
+      });
+      message.success('案件推送已发送/预约');
+      setPushData({ scheduledAt: null, immediate: true });
+    } catch (err) {
+      console.error('推送失败:', err);
+      message.error('推送失败: ' + (err.response?.data?.detail || '未知错误'));
     } finally {
       setLoading(false);
     }
@@ -725,14 +757,24 @@ function PersonalPush({ caseData }) {
   return (
     <Card title={<><UserOutlined /> 个人案件推送</>} style={{ marginBottom: 16 }}>
       <Form layout="vertical">
-        <Form.Item label="推送内容">
-          <TextArea
-            rows={4}
-            value={pushData.message}
-            onChange={e => setPushData(p => ({ ...p, message: e.target.value }))}
-            placeholder="输入要推送给用户的消息内容..."
-          />
+        {/* 显示 Case Overview 预览 */}
+        <Form.Item label="案件信息预览 (Case Overview)">
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 16, 
+            borderRadius: 8,
+            fontFamily: 'monospace',
+            whiteSpace: 'pre-wrap',
+            fontSize: 13,
+            lineHeight: 1.6
+          }}>
+            {caseOverview.overviewText}
+          </div>
+          <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
+            <InfoCircleOutlined /> 将自动推送当前案件状态给用户
+          </div>
         </Form.Item>
+        
         <Form.Item label="发送方式">
           <Space>
             <Button
@@ -756,16 +798,238 @@ function PersonalPush({ caseData }) {
             <DatePicker
               showTime
               style={{ width: '100%' }}
-              placeholder="选择发送时间"
+              placeholder="选择推送时间"
               onChange={(date) => setPushData(p => ({ ...p, scheduledAt: date ? date.format('YYYY-MM-DD HH:mm:ss') : null }))}
             />
           </Form.Item>
         )}
-        <Button type="primary" icon={<SendOutlined />} onClick={handleSend} loading={loading}>
-          {pushData.immediate ? '立即推送' : '预约推送'}
+        <Button 
+          type="primary" 
+          icon={<SendOutlined />} 
+          onClick={handleSend} 
+          loading={loading}
+          size="large"
+        >
+          {pushData.immediate ? '立即推送案件状态' : '预约推送案件状态'}
         </Button>
       </Form>
     </Card>
+  );
+}
+
+// ── 推送记录面板组件 ─────────────────────────────────────────
+function PushTasksPanel({ caseNo }) {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [countdowns, setCountdowns] = useState({});
+
+  const loadTasks = async () => {
+    setLoading(true);
+    try {
+      const res = await pushTaskAPI.getByCase(caseNo);
+      setTasks(res.data.tasks || []);
+    } catch {
+      message.error('加载推送记录失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTasks();
+    const timer = setInterval(() => updateCountdowns(), 1000);
+    return () => clearInterval(timer);
+  }, [caseNo]);
+
+  const updateCountdowns = () => {
+    const now = dayjs();
+    const newCountdowns = {};
+    tasks.forEach(task => {
+      if (task.status === 'pending' && task.scheduled_at) {
+        const scheduled = dayjs(task.scheduled_at);
+        const diff = scheduled.diff(now);
+        if (diff > 0) {
+          const minutes = Math.floor(diff / 60000);
+          const seconds = Math.floor((diff % 60000) / 1000);
+          newCountdowns[task.id] = `${minutes}分${seconds}秒`;
+          if (minutes < 1) {
+            newCountdowns[task.id] = { text: `${seconds}秒`, urgent: true };
+          }
+        } else {
+          newCountdowns[task.id] = { text: '即将发送', urgent: true };
+        }
+      }
+    });
+    setCountdowns(newCountdowns);
+  };
+
+  const handleSendNow = async (taskId) => {
+    try {
+      await pushTaskAPI.sendNow(taskId);
+      message.success('推送已发送');
+      loadTasks();
+    } catch (e) {
+      message.error(e.response?.data?.detail || '发送失败');
+    }
+  };
+
+  const handleRetry = async (taskId) => {
+    try {
+      await pushTaskAPI.retry(taskId);
+      message.success('任务已重新安排');
+      loadTasks();
+    } catch (e) {
+      message.error(e.response?.data?.detail || '重试失败');
+    }
+  };
+
+  const handleCancel = async (taskId) => {
+    try {
+      await pushTaskAPI.cancel(taskId);
+      message.success('任务已取消');
+      loadTasks();
+    } catch (e) {
+      message.error(e.response?.data?.detail || '取消失败');
+    }
+  };
+
+  const statusColors = {
+    pending: 'orange',
+    sent: 'blue',
+    read: 'green',
+    failed: 'red',
+    cancelled: 'gray',
+  };
+
+  const statusLabels = {
+    pending: '等待中',
+    sent: '已发送',
+    read: '已读',
+    failed: '失败',
+    cancelled: '已取消',
+  };
+
+  const columns = [
+    {
+      title: '阶段',
+      dataIndex: 'phase',
+      key: 'phase',
+      render: (phase) => (
+        <Tag color="blue">{phase} {PHASE_LABELS[phase]}</Tag>
+      ),
+    },
+    {
+      title: '推送类型',
+      dataIndex: 'push_type',
+      key: 'push_type',
+      render: (type) => type === 'auto' ? '自动' : '手动',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status) => (
+        <Tag color={statusColors[status] || 'default'}>
+          {statusLabels[status] || status}
+        </Tag>
+      ),
+    },
+    {
+      title: '计划时间',
+      dataIndex: 'scheduled_at',
+      key: 'scheduled_at',
+      render: (v) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-',
+    },
+    {
+      title: '倒计时',
+      key: 'countdown',
+      render: (_, record) => {
+        if (record.status === 'pending' && countdowns[record.id]) {
+          const cd = countdowns[record.id];
+          return (
+            <span style={{ color: cd.urgent ? '#ff4d4f' : '#faad14', fontWeight: cd.urgent ? 'bold' : 'normal' }}>
+              {cd.text || cd}
+            </span>
+          );
+        }
+        return '-';
+      },
+    },
+    {
+      title: '实际发送',
+      dataIndex: 'sent_at',
+      key: 'sent_at',
+      render: (v) => v ? dayjs(v).format('MM-DD HH:mm') : '-',
+    },
+    {
+      title: '已读时间',
+      dataIndex: 'read_at',
+      key: 'read_at',
+      render: (v) => v ? dayjs(v).format('MM-DD HH:mm') : '-',
+    },
+    {
+      title: '失败原因',
+      dataIndex: 'error_message',
+      key: 'error_message',
+      render: (v) => v ? <span style={{ color: 'red' }}>{v.substring(0, 50)}</span> : '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, record) => (
+        <Space>
+          {record.status === 'pending' && (
+            <>
+              <Button 
+                type="primary" 
+                size="small" 
+                onClick={() => handleSendNow(record.id)}
+                loading={loading}
+              >
+                立即推送
+              </Button>
+              <Button 
+                danger 
+                size="small" 
+                onClick={() => handleCancel(record.id)}
+                loading={loading}
+              >
+                取消
+              </Button>
+            </>
+          )}
+          {record.status === 'failed' && (
+            <Button 
+              type="primary" 
+              size="small" 
+              onClick={() => handleRetry(record.id)}
+              loading={loading}
+            >
+              重试
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>共 {tasks.length} 条推送记录</span>
+        <Button type="primary" onClick={loadTasks} loading={loading}>
+          刷新
+        </Button>
+      </div>
+      <Table 
+        dataSource={tasks} 
+        columns={columns} 
+        rowKey="id" 
+        size="small"
+        pagination={{ pageSize: 10 }}
+        loading={loading}
+      />
+    </div>
   );
 }
 
@@ -897,6 +1161,10 @@ function CaseDetail() {
 
               <TabPane tab="个人推送" key="personal">
                 <PersonalPush caseData={caseData} />
+              </TabPane>
+
+              <TabPane tab="推送记录" key="push">
+                <PushTasksPanel caseNo={caseId} />
               </TabPane>
             </Tabs>
           </Card>

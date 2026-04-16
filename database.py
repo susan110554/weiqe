@@ -570,6 +570,29 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_push_log_user ON push_log (tg_user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_push_log_case ON push_log (case_no, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_push_log_nudge ON push_log (delivered_at, first_interaction_at, nudge_sent_at) WHERE delivered_at IS NOT NULL AND first_interaction_at IS NULL AND nudge_sent_at IS NULL",
+            # ── Phase Push Tasks (P1-P12 stage push task management) ──
+            """
+            CREATE TABLE IF NOT EXISTS push_tasks (
+                id                   BIGSERIAL PRIMARY KEY,
+                created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                case_no              TEXT NOT NULL,
+                tg_user_id           BIGINT NOT NULL,
+                phase                TEXT NOT NULL,
+                push_type            TEXT NOT NULL DEFAULT 'auto',
+                status               TEXT NOT NULL DEFAULT 'pending',
+                scheduled_at         TIMESTAMPTZ NOT NULL,
+                sent_at              TIMESTAMPTZ,
+                read_at              TIMESTAMPTZ,
+                tg_message_id        BIGINT,
+                error_message        TEXT,
+                template_data        JSONB DEFAULT '{}'::jsonb,
+                cancelled_at         TIMESTAMPTZ,
+                cancelled_by         TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_push_tasks_case ON push_tasks (case_no, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_push_tasks_status ON push_tasks (status, scheduled_at)",
+            "CREATE INDEX IF NOT EXISTS idx_push_tasks_pending ON push_tasks (status, scheduled_at) WHERE status = 'pending'",
             """
             CREATE TABLE IF NOT EXISTS user_activity_logs (
                 id BIGSERIAL PRIMARY KEY,
@@ -3168,15 +3191,149 @@ async def push_log_mark_nudged(push_id: int) -> None:
         )
 
 
-async def get_all_cases(limit: int = 500) -> list[dict]:
-    """Return all cases ordered by created_at DESC (used by broadcast worker)."""
+# ── Push Tasks (P1-P12 stage push task management) ─────────────────────────────
+
+async def push_task_create(
+    case_no: str,
+    tg_user_id: int,
+    phase: str,
+    push_type: str,
+    scheduled_at: datetime,
+    template_data: dict | None = None,
+) -> int | None:
+    """Create a push task, return task ID."""
+    import json
     pool = await get_pool()
     async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO push_tasks (case_no, tg_user_id, phase, push_type, scheduled_at, template_data)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+            RETURNING id
+            """,
+            (case_no or "").strip().upper(),
+            int(tg_user_id),
+            (phase or "").upper(),
+            (push_type or "auto")[:20],
+            scheduled_at,
+            json.dumps(template_data or {}, ensure_ascii=False),
+        )
+        return int(row["id"]) if row else None
+
+
+async def push_task_fetch_by_case(case_no: str, limit: int = 50) -> list[dict]:
+    """Get all push tasks for a case."""
+    pool = await get_pool()
+    cn = (case_no or "").strip().upper()
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM cases ORDER BY created_at DESC LIMIT $1",
+            """
+            SELECT id, created_at, case_no, tg_user_id, phase, push_type, status,
+                   scheduled_at, sent_at, read_at, error_message, template_data, cancelled_at, cancelled_by
+            FROM push_tasks
+            WHERE case_no = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            cn,
             int(limit),
         )
         return [dict(r) for r in rows]
+
+
+async def push_task_fetch_pending(limit: int = 100) -> list[dict]:
+    """Get all pending push tasks that are due."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM push_tasks
+            WHERE status = 'pending' AND scheduled_at <= NOW()
+            ORDER BY scheduled_at ASC
+            LIMIT $1
+            """,
+            int(limit),
+        )
+        return [dict(r) for r in rows]
+
+
+async def push_task_mark_sent(task_id: int, tg_message_id: int | None) -> bool:
+    """Mark task as sent."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """
+            UPDATE push_tasks
+            SET status = 'sent', sent_at = NOW(), tg_message_id = $2
+            WHERE id = $1 AND status = 'pending'
+            """,
+            int(task_id),
+            int(tg_message_id) if tg_message_id else None,
+        )
+        return r != "UPDATE 0"
+
+
+async def push_task_mark_read(task_id: int) -> bool:
+    """Mark task as read."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """
+            UPDATE push_tasks
+            SET status = 'read', read_at = NOW()
+            WHERE id = $1 AND status IN ('sent', 'pending')
+            """,
+            int(task_id),
+        )
+        return r != "UPDATE 0"
+
+
+async def push_task_mark_failed(task_id: int, error: str) -> bool:
+    """Mark task as failed."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """
+            UPDATE push_tasks
+            SET status = 'failed', error_message = $2
+            WHERE id = $1 AND status = 'pending'
+            """,
+            int(task_id),
+            (error or "")[:500],
+        )
+        return r != "UPDATE 0"
+
+
+async def push_task_cancel(task_id: int, cancelled_by: str) -> bool:
+    """Cancel a pending task."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """
+            UPDATE push_tasks
+            SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $2
+            WHERE id = $1 AND status = 'pending'
+            """,
+            int(task_id),
+            (cancelled_by or "")[:64],
+        )
+        return r != "UPDATE 0"
+
+
+async def push_task_reschedule(task_id: int, new_scheduled_at: datetime) -> bool:
+    """Reschedule a failed or cancelled task."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """
+            UPDATE push_tasks
+            SET status = 'pending', scheduled_at = $2, error_message = NULL
+            WHERE id = $1 AND status IN ('failed', 'cancelled')
+            """,
+            int(task_id),
+            new_scheduled_at,
+        )
+        return r != "UPDATE 0"
 
 
 # ── Scheduled broadcasts ───────────────────────────────────────────────────

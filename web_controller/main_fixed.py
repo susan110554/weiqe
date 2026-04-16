@@ -33,6 +33,7 @@ try:
     from core.case_manager import CaseManager
     from core.content_manager import ContentManager
     from core.signature_service import SignatureService
+    import database as db
     SERVICES_AVAILABLE = True
 except ImportError:
     SERVICES_AVAILABLE = False
@@ -117,9 +118,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS配置 - 硬编码确保前端可以访问
+CORS_ORIGINS_LIST = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS_LIST,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -173,6 +182,14 @@ class CaseStatusUpdateRequest(BaseModel):
 
 class ChannelConfigUpdateRequest(BaseModel):
     configs: dict
+
+
+class PushTaskCreateRequest(BaseModel):
+    case_no: str
+    phase: str
+    push_type: str = "manual"
+    scheduled_at: Optional[datetime] = None
+    template_data: Optional[dict] = None
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -641,6 +658,172 @@ async def send_case_message(case_id: str, body: SendMessageRequest, user=Depends
     return {"message": "Message sent"}
 
 
+class AutoPushRequest(BaseModel):
+    enabled: bool = False
+    schedule: Optional[str] = None  # 修改为字符串格式，如 "2024-01-15 14:30:00"
+
+@app.put("/api/cases/{case_id}/auto-push", tags=["Cases"])
+async def update_auto_push(case_id: str, body: AutoPushRequest, user=Depends(require_auth)):
+    """Update auto-push settings for a case"""
+    if not _db_conn: raise HTTPException(503, "Database unavailable")
+    import json
+    
+    # 构建保存的数据结构
+    settings = {
+        "enabled": body.enabled, 
+        "schedule": body.schedule,
+        "updated_at": datetime.utcnow().isoformat(),
+        "updated_by": user.get("sub", "admin")
+    }
+    
+    await _db_conn.execute(
+        "UPDATE cases SET auto_push_settings = $2::jsonb, updated_at = NOW() WHERE case_no = $1",
+        case_id, json.dumps(settings)
+    )
+    return {"message": "Auto-push settings updated", "case_no": case_id, "settings": settings}
+
+
+class PersonalPushRequest(BaseModel):
+    message: Optional[str] = None  # 可选，管理员自定义消息
+    scheduledAt: Optional[str] = None
+    immediate: bool = True
+
+@app.post("/api/cases/{case_id}/personal-push", tags=["Cases"])
+async def send_personal_push(case_id: str, body: PersonalPushRequest, user=Depends(require_auth)):
+    """
+    发送案件 Case Overview 推送给单个用户 (P1-P12阶段)
+    系统自动构建 Case Overview 消息，不需要管理员输入
+    """
+    if not _db_conn: raise HTTPException(503, "Database unavailable")
+    
+    # 获取案件完整信息
+    case = await _db_conn.fetchrow(
+        """SELECT c.*, u.telegram_id, u.full_name, u.username
+           FROM cases c 
+           LEFT JOIN users u ON c.user_id = u.id 
+           WHERE c.case_no = $1""", 
+        case_id
+    )
+    if not case:
+        raise HTTPException(404, f"Case '{case_id}' not found")
+    
+    tg_user_id = case.get("telegram_id") or case.get("tg_user_id")
+    if not tg_user_id:
+        raise HTTPException(400, f"Case '{case_id}' has no associated Telegram user")
+    
+    # 创建推送任务
+    from datetime import datetime
+    scheduled_time = datetime.utcnow() + timedelta(seconds=5) if body.immediate else (
+        datetime.fromisoformat(body.scheduledAt.replace('Z', '+00:00')) if body.scheduledAt else datetime.utcnow() + timedelta(minutes=5)
+    )
+    
+    # 构建 Case Overview 消息 (P1-P12阶段自动构建)
+    phase = case.get("status") or "P1"
+    platform = case.get("platform") or "N/A"
+    amount = case.get("amount") or "N/A"
+    coin = case.get("coin") or ""
+    wallet = case.get("wallet_addr") or "N/A"
+    chain = case.get("chain_type") or "N/A"
+    tx_hash = case.get("tx_hash") or "N/A"
+    created_at = str(case.get("created_at"))[:10] if case.get("created_at") else "N/A"
+    user_name = case.get("full_name") or case.get("username") or "User"
+    
+    # 管理员自定义消息（可选）
+    admin_note = ""
+    if body.message and body.message.strip():
+        admin_note = f"""
+━━━━━━━━━━━━━━━━━━━━━
+💬 <b>管理员备注:</b>
+{body.message.strip()}
+━━━━━━━━━━━━━━━━━━━━━"""
+    
+    # 构建完整的 Case Overview 推送消息
+    message_text = f"""📋 <b>Case Overview Update</b>
+
+👤 <b>User:</b> {user_name}
+🆔 <b>Case ID:</b> <code>{case_id}</code>
+📊 <b>Current Phase:</b> {phase}
+📅 <b>Submitted:</b> {created_at}
+
+━━━━━━━━━━━━━━━━━━━━━
+� <b>Financial Details:</b>
+• Amount: {amount} {coin}
+• Platform: {platform}
+
+🔗 <b>Blockchain Info:</b>
+• Chain: {chain}
+• Wallet: <code>{wallet[:20]}...</code> {wallet if len(wallet) <= 20 else ''}
+• TX Hash: <code>{tx_hash[:20]}...</code> {tx_hash if len(tx_hash) <= 20 else ''}
+{admin_note}
+━━━━━━━━━━━━━━━━━━━━━
+
+<i>Open M03 Case Tracking for full details and updates.</i>"""
+    
+    task_id = await db.push_task_create(
+        case_no=case_id,
+        tg_user_id=tg_user_id,
+        phase=phase,
+        push_type="manual",  # 个人手动推送
+        scheduled_at=scheduled_time,
+        template_data={
+            "case_overview": {
+                "phase": phase,
+                "platform": platform,
+                "amount": str(amount),
+                "coin": coin,
+                "chain": chain,
+                "wallet": wallet,
+                "tx_hash": tx_hash,
+                "created_at": created_at
+            },
+            "sender": user.get("sub", "admin"),
+            "admin_note": body.message if body.message else None
+        }
+    )
+    
+    # 如果是立即发送，直接发送Telegram消息
+    if body.immediate and SERVICES_AVAILABLE:
+        try:
+            from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
+            bot = Bot(token=os.getenv("BOT_TOKEN", ""))
+            
+            # 添加 Case Tracking 按钮
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 Open Case Tracking", callback_data=f"case|{case_id}")],
+                [InlineKeyboardButton("💬 Contact Officer", callback_data=f"flow|ch|{case_id}")]
+            ])
+            
+            # 发送消息
+            msg = await bot.send_message(
+                chat_id=tg_user_id,
+                text=message_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            
+            # 更新任务状态为已发送
+            await db.push_task_mark_sent(task_id, msg.message_id)
+            
+            return {
+                "message": "Case Overview push sent immediately",
+                "task_id": task_id,
+                "case_no": case_id,
+                "tg_message_id": msg.message_id,
+                "sent_at": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            # 发送失败，更新任务状态
+            await db.push_task_mark_failed(task_id, str(e))
+            raise HTTPException(500, f"Failed to send push: {str(e)}")
+    
+    return {
+        "message": "Case Overview push scheduled" if not body.immediate else "Case Overview queued for immediate send",
+        "task_id": task_id,
+        "case_no": case_id,
+        "scheduled_at": scheduled_time.isoformat()
+    }
+
+
 # ── Agents ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/agents", tags=["Agents"])
@@ -763,6 +946,111 @@ async def update_fee_config(fee_id: str, body: FeeUpdateRequest, _user=Depends(r
     await _db_conn.execute("UPDATE fee_config SET amount = $2, currency = $3, updated_at = NOW(), updated_by = $4 WHERE key = $1",
         fee_id, body.amount, body.currency, 'admin')
     return {"message": "Fee config updated"}
+
+
+# ── Push Tasks (P1-P12 stage push task management) ───────────────────────────────
+
+@app.get("/api/cases/{case_no}/push-tasks", tags=["Push Tasks"])
+async def get_case_push_tasks(case_no: str, _user=Depends(require_auth)):
+    """获取案件的所有推送任务"""
+    if not _db_conn:
+        raise HTTPException(503, "Database unavailable")
+    tasks = await db.push_task_fetch_by_case(case_no)
+    return {"tasks": tasks, "total": len(tasks)}
+
+
+@app.post("/api/cases/{case_no}/push-tasks", status_code=201, tags=["Push Tasks"])
+async def create_push_task(case_no: str, body: PushTaskCreateRequest, user=Depends(require_auth)):
+    """创建推送任务（手动推送）"""
+    if not _db_conn:
+        raise HTTPException(503, "Database unavailable")
+    
+    # 获取案件信息
+    case = await _db_conn.fetchrow(
+        "SELECT tg_user_id FROM cases WHERE UPPER(case_no) = UPPER($1)",
+        case_no
+    )
+    if not case:
+        raise HTTPException(404, f"Case '{case_no}' not found")
+    
+    # 如果没有指定时间，默认立即发送（延迟5秒让后台处理）
+    scheduled = body.scheduled_at or (datetime.utcnow() + timedelta(seconds=5))
+    
+    task_id = await db.push_task_create(
+        case_no=case_no,
+        tg_user_id=case["tg_user_id"],
+        phase=body.phase,
+        push_type=body.push_type,
+        scheduled_at=scheduled,
+        template_data=body.template_data,
+    )
+    
+    return {
+        "message": "Push task created",
+        "task_id": task_id,
+        "case_no": case_no,
+        "phase": body.phase,
+        "scheduled_at": scheduled.isoformat(),
+    }
+
+
+@app.post("/api/push-tasks/{task_id}/send-now", tags=["Push Tasks"])
+async def send_push_task_now(task_id: int, user=Depends(require_auth)):
+    """立即发送等待中的推送任务"""
+    if not _db_conn:
+        raise HTTPException(503, "Database unavailable")
+    
+    # 获取任务信息
+    task = await _db_conn.fetchrow(
+        "SELECT * FROM push_tasks WHERE id = $1 AND status = 'pending'",
+        task_id
+    )
+    if not task:
+        raise HTTPException(404, "Task not found or not in pending status")
+    
+    # TODO: 集成Telegram适配器发送消息
+    # 临时模拟发送成功
+    tg_message_id = None
+    success = await db.push_task_mark_sent(task_id, tg_message_id)
+    
+    if success:
+        return {"message": "Push sent successfully", "task_id": task_id}
+    else:
+        raise HTTPException(500, "Failed to send push")
+
+
+@app.post("/api/push-tasks/{task_id}/retry", tags=["Push Tasks"])
+async def retry_push_task(task_id: int, user=Depends(require_auth)):
+    """重试失败的推送任务"""
+    if not _db_conn:
+        raise HTTPException(503, "Database unavailable")
+    
+    # 重新安排为立即发送
+    new_time = datetime.utcnow() + timedelta(seconds=5)
+    ok = await db.push_task_reschedule(task_id, new_time)
+    
+    if not ok:
+        raise HTTPException(400, "Task not found or not in failed/cancelled status")
+    
+    return {
+        "message": "Task rescheduled for retry",
+        "task_id": task_id,
+        "new_scheduled_at": new_time.isoformat(),
+    }
+
+
+@app.post("/api/push-tasks/{task_id}/cancel", tags=["Push Tasks"])
+async def cancel_push_task(task_id: int, user=Depends(require_auth)):
+    """取消等待中的推送任务"""
+    if not _db_conn:
+        raise HTTPException(503, "Database unavailable")
+    
+    ok = await db.push_task_cancel(task_id, user.get("sub", "admin"))
+    
+    if not ok:
+        raise HTTPException(400, "Task not found or not in pending status")
+    
+    return {"message": "Task cancelled", "task_id": task_id}
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

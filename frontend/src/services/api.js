@@ -109,4 +109,12 @@ export const feeAPI = {
   update: (id, data) => apiClient.put(`/api/fee-config/${id}`, data),
 };
 
+export const pushTaskAPI = {
+  getByCase: (caseNo) => apiClient.get(`/api/cases/${caseNo}/push-tasks`),
+  create: (caseNo, data) => apiClient.post(`/api/cases/${caseNo}/push-tasks`, data),
+  sendNow: (taskId) => apiClient.post(`/api/push-tasks/${taskId}/send-now`),
+  retry: (taskId) => apiClient.post(`/api/push-tasks/${taskId}/retry`),
+  cancel: (taskId) => apiClient.post(`/api/push-tasks/${taskId}/cancel`),
+};
+
 export default apiClient;

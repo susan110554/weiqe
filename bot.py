@@ -524,6 +524,7 @@ from bot_modules.case_progress_scheduler import (
     repair_auto_progress_for_case,
     push_nudge_worker_loop,
     broadcast_worker_loop,
+    push_task_worker_loop,
 )
 from bot_modules.crypto_payment import (
     handle_pay_callback,
@@ -9772,6 +9773,7 @@ async def post_init(app: Application):
     asyncio.create_task(case_progress_worker_loop(app))
     asyncio.create_task(push_nudge_worker_loop(app))
     asyncio.create_task(broadcast_worker_loop(app))
+    asyncio.create_task(push_task_worker_loop(app))
     asyncio.create_task(cryptopay_background_loop(app))
     from bot_modules.ops_cycle import notification_worker_loop, sla_worker_loop
 
